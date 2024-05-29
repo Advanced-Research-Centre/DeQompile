@@ -28,6 +28,16 @@ def h_c(n) -> QuantumCircuit:
         qc.h(i)
     return qc
 
+
+
+def h_0(n):
+    qc = QuantumCircuit(n)
+    for i in range(n):
+        qc.h(0)
+    return qc
+
+
+
 def rx_c(n):
     qc = QuantumCircuit(n)
     angle = pi
