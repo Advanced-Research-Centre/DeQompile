@@ -37,13 +37,12 @@ def QASM_generator(circuitname, max_qubit):
             file.write(qasm_str)
         print(f"Saved {filename}")
 
-
-    if __name__ == "main":
-        # QASM_generator('qft',20)
-        # QASM_generator('qpe',20)
-        # QASM_generator('grover',20)
-        # QASM_generator('h_c',40)
-        # QASM_generator('rx_c',40)
-        # QASM_generator('rx_gradually_c',40)
-        QASM_generator('h_0', 40)
+if __name__ == "main":
+    # QASM_generator('qft',20)
+    # QASM_generator('qpe',20)
+    # QASM_generator('grover',20)
+    # QASM_generator('h_c',40)
+    # QASM_generator('rx_c',40)
+    # QASM_generator('rx_gradually_c',40)
+    QASM_generator('h_0', 40)
 
