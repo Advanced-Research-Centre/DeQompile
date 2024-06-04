@@ -278,18 +278,18 @@ def generate_random_circuit_ast(num_nodes, operations, max_loop_depth):
         gate = random.choice(operations)
         if random.choice([True, False]):  # Randomly decide to use a loop or a single operation
             loop_body = []
-            depth += 1
+    
             loop_depth = random.randint(1, max_loop_depth)
             loop_vars = [f"i{ind}" for ind in range(loop_depth)]
             current_body = loop_body  # Initialize current_body to loop_body
             for j in range(loop_depth):
+                depth += 1
                 loop = ast.For(
                     target=ast.Name(id=loop_vars[depth-1], ctx=ast.Store()),
                     iter=ast.Call(func=ast.Name(id='range', ctx=ast.Load()), args=[loop_index(depth)], keywords=[]),  # Use loop_index here
                     body=[],
                     orelse=[]
                 )
-                depth += 1
                 current_body.append(loop)  # Append loop to the current body
                 current_body = loop.body  # Update current_body to the new loop's body
 
