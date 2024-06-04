@@ -11,7 +11,7 @@ import Levenshtein
 
 class genetic_Decompiler:
     def __init__(self, algorithm_name, qubit_limit=20, generations=100, pop_size=50, max_length=10, perform_crossover=True,
-                crossover_rate=0.3, new_gen_rate=0.2,mutation_rate=0.1,compare_method='l_by_l',
+                crossover_rate=0.3, new_gen_rate=0.2,mutation_rate=0.1,compare_method='l_by_l',max_loop_depth=2,
                   perform_mutation=True, selection_method='tournament',operations = ['h', 'x', 'cx']):
         self.algorithm_name = algorithm_name
         self.qubit_limit = qubit_limit
@@ -21,6 +21,7 @@ class genetic_Decompiler:
         self.crossover_rate=crossover_rate
         self.mutation_rate=mutation_rate
         self.new_gen_rate=new_gen_rate
+        self.max_loop_depth=max_loop_depth
         self.perform_crossover = perform_crossover
         self.compare_method=compare_method
         self.perform_mutation = perform_mutation
@@ -38,48 +39,16 @@ class genetic_Decompiler:
         for _ in range(size):
             # num_qubits = random.randint(2, self.qubit_limit)
             num_nodes = random.randint(1, self.max_length)
-            ast_circuit = generate_random_circuit_ast( num_nodes,self.operations)
+            ast_circuit = generate_random_circuit_ast( num_nodes,self.operations,max_loop_depth=self.max_loop_depth)
             population.append(ast_circuit)
         return population
 
-    def analyze_difference(self, sequence, target_sequence):
-        differences = []
-        for i, (gate1, gate2) in enumerate(zip(sequence, target_sequence)):
-            if gate1 != gate2:
-                differences.append((i, gate1, gate2))
-        return differences
-
-    def mutate_individual(self, individual, target_individual):
-        sequence = self.qasm_to_gate_sequence(individual)
-        target_sequence = self.qasm_to_gate_sequence(target_individual)
-        differences = self.analyze_difference(sequence, target_sequence)
-
-        mutation_type = random.choice(['operation', 'phase', 'coefficient'])
-        for index, gate1, gate2 in differences:
-            if mutation_type == 'operation':
-                individual[index] = self.mutate_operation(gate1, gate2)
-            elif mutation_type == 'phase':
-                individual[index] = self.mutate_phase(gate1, gate2)
-            elif mutation_type == 'coefficient':
-                individual[index] = self.mutate_coefficient(gate1, gate2)
-        return individual
-
-    def mutate_operation(self, gate1, gate2):
-        new_gate = random.choice(self.operations)
-        return (new_gate, gate1[1], gate1[2]) if len(gate1) == 3 else (new_gate, gate1[1])
-
-    def mutate_phase(self, gate1, gate2):
-        new_phase = random.uniform(-3.14, 3.14)
-        return (gate1[0], gate1[1], [new_phase])
-
-    def mutate_coefficient(self, gate1, gate2):
-        a = random.choice([random.uniform(-3.14, 3.14), 0])
-        b = random.choice([random.uniform(-3.14, 3.14), 0])
-        c = random.randint(0, 4)
-        new_phase = 3.14 * 1 / (2**a + b + c)
-        return (gate1[0], gate1[1], [new_phase])
+    def mutate(self, ast_circuit):
+        # Create a deep copy of the AST to avoid modifying the original AST
+        ast_circuit_copy = deepcopy(ast_circuit)
+        
         # Randomly select mutation position
-        num_operations = len(ast_circuit.body[0].body) - 1
+        num_operations = len(ast_circuit_copy.body[0].body) - 1
         mutation_index = random.randint(1, num_operations - 1)
         
         # Randomly select mutation type
@@ -88,18 +57,18 @@ class genetic_Decompiler:
         if mutation_type == 'insert':
             # Insert a new quantum gate
             new_gate_ast = generate_random_circuit_ast(1, self.operations)  # Generate AST for one random gate
-            ast_circuit.body[0].body.insert(mutation_index, new_gate_ast.body[0].body[1])  # Insert the new gate
+            ast_circuit_copy.body[0].body.insert(mutation_index, new_gate_ast.body[0].body[1])  # Insert the new gate
             
         elif mutation_type == 'modify':
             # Modify an existing quantum gate
-            existing_gate = ast_circuit.body[0].body[mutation_index]
+            existing_gate = ast_circuit_copy.body[0].body[mutation_index]
             if isinstance(existing_gate, ast.Expr):
                 new_gate_ast = generate_random_circuit_ast(1, self.operations)
-                ast_circuit.body[0].body[mutation_index] = new_gate_ast.body[0].body[1]  # Replace the gate
+                ast_circuit_copy.body[0].body[mutation_index] = new_gate_ast.body[0].body[1]  # Replace the gate
         
-        ast.fix_missing_locations(ast_circuit)
-        return ast_circuit
-
+        ast.fix_missing_locations(ast_circuit_copy)
+        return ast_circuit_copy
+    
     def crossover(self, parent1, parent2):
         # Select crossover points
         index1 = random.randint(1, len(parent1.body[0].body) - 2)
@@ -199,7 +168,6 @@ class genetic_Decompiler:
                 file.write(python_code)
 
     def save_qasm(self):
-     
         for filename in os.listdir(self.path):
             if filename.endswith('.py'):
                 full_py_path = os.path.join(self.path, filename)
@@ -208,7 +176,6 @@ class genetic_Decompiler:
                 with open(full_py_path, 'r') as file:
                     module_code = "from qiskit import QuantumCircuit\nimport numpy as np\nimport random\nfrom math import pi\n" + file.read()
 
-                
                 local_namespace = {}
                 exec(module_code, local_namespace)
                 
@@ -218,12 +185,34 @@ class genetic_Decompiler:
                 os.makedirs(qasm_dir_path, exist_ok=True)
                 
                 # Generate QASM files for each qubit count
-                for i in range(2, 41):
-                    qc = local_namespace['generate_random_circuit_ast'](i)
-                    qasm_output = qc.qasm()
+                for i in range(2, self.qubit_limit + 1):
+                    try:
+                        qc = local_namespace['generate_random_circuit_ast'](i)
+                        
+                        # Check and modify cx gates if necessary
+                        modified_circuit = QuantumCircuit(qc.num_qubits)
+                        for gate, qargs, cargs in qc.data:
+                            if gate.name == 'cx':
+                                control_qubit, target_qubit = qargs
+                                if control_qubit.index == target_qubit.index:
+                                    # Adjust target qubit index to be different from control qubit index
+                                    target_qubit = qc.qubits[(target_qubit.index + 1) % qc.num_qubits]
+                                    modified_circuit.cx(control_qubit, target_qubit)
+                                else:
+                                    modified_circuit.cx(control_qubit, target_qubit)
+                            else:
+                                modified_circuit.append(gate, qargs, cargs)
+                        
+                        qasm_output = modified_circuit.qasm()
+                    except (CircuitError, ZeroDivisionError) as e:
+                    # Handle both CircuitError and ZeroDivisionError
+                    # print(f"Error generating QASM for {filename} with {i} qubits: {e}")
+                        qasm_output = ""  # Save an empty QASM file if there's an error
+                    
                     qasm_filename = os.path.join(qasm_dir_path, f"{file_base_name}_{i}.qasm")
                     with open(qasm_filename, 'w') as f:
-                        f.write(qasm_output)  
+                        f.write(qasm_output)
+
     
     def qasm_to_unitary(self, qasm_file_path):
         # Read QASM file and create a quantum circuit
@@ -261,7 +250,7 @@ class genetic_Decompiler:
                 gate_sequence.append((gate_name, tuple(qubits)))
         
         return gate_sequence
-    
+      
     def gate_sequence_similarity(self, seq1, seq2):
         seq1_str = ' '.join([f"{gate[0]}{gate[1]}{[f'{param:.6f}' for param in gate[2]]}" if len(gate) == 3 else f"{gate[0]}{gate[1]}" for gate in seq1])
         seq2_str = ' '.join([f"{gate[0]}{gate[1]}{[f'{param:.6f}' for param in gate[2]]}" if len(gate) == 3 else f"{gate[0]}{gate[1]}" for gate in seq2])
@@ -304,34 +293,21 @@ class genetic_Decompiler:
         
         return dot_product / (norm1 * norm2)
 
+
     def compare_qasm(self, qasm, target_qasm):
+        def is_file_empty(file_path):
+            return os.path.getsize(file_path) == 0
+
+        if is_file_empty(qasm) or is_file_empty(target_qasm):
+            return 0
         try:
-            if self.compare_method == 'intersection':
-                with open(qasm, 'r') as file1, open(target_qasm, 'r') as file2:
-                    qasm_lines = file1.readlines()
-                    target_qasm_lines = file2.readlines()
-                    
-                    # Convert lists to sets for intersection calculation
-                    qasm_lines_set = set(qasm_lines)
-                    target_qasm_lines_set = set(target_qasm_lines)
-
-                    # Calculate intersection
-                    intersection = qasm_lines_set.intersection(target_qasm_lines_set)
-
-                    # Calculate max length of the two files
-                    max_length = max(len(qasm_lines), len(target_qasm_lines))
-
-                    # Calculate similarity score as intersection over max length of the two files
-                    score = len(intersection) / max_length if max_length else 0
-                    return score
-
-            elif self.compare_method == 'fidelity':
+            if self.compare_method == 'fidelity':
                 # Calculate unitary matrices for both QASM files
                 unitary1 = self.qasm_to_unitary(qasm)
                 unitary2 = self.qasm_to_unitary(target_qasm)
                 
                 # Calculate fidelity
-                fidelity_score = state_fidelity(Operator(unitary1), Operator(unitary2))
+                fidelity_score = process_fidelity(unitary1,unitary2)
                 return fidelity_score
 
             elif self.compare_method == 'seq_similarity':
@@ -355,13 +331,27 @@ class genetic_Decompiler:
                 # Gate frequency similarity
                 freq_similarity = self.gate_frequency_similarity(qasm, target_qasm)
                 
-                # Unitary fidelity
-                unitary1 = self.qasm_to_unitary(qasm)
-                unitary2 = self.qasm_to_unitary(target_qasm)
-                fidelity_score = state_fidelity(Operator(unitary1), Operator(unitary2))
+                # intersection
+                with open(qasm, 'r') as file1, open(target_qasm, 'r') as file2:
+                    qasm_lines = file1.readlines()
+                    target_qasm_lines = file2.readlines()
+                    
+                    # Convert lists to sets for intersection calculation
+                    qasm_lines_set = set(qasm_lines)
+                    target_qasm_lines_set = set(target_qasm_lines)
+
+                    # Calculate intersection
+                    intersection = qasm_lines_set.intersection(target_qasm_lines_set)
+
+                    # Calculate max length of the two files
+                    max_length = max(len(qasm_lines), len(target_qasm_lines))
+
+                    # Calculate similarity score as intersection over max length of the two files
+                    inter_section_score = len(intersection) / max_length if max_length else 0
                 
                 # Combine scores with equal weighting
-                combined_score = (seq_similarity + freq_similarity + fidelity_score) / 3
+                
+                combined_score = (seq_similarity + freq_similarity + inter_section_score) / 3
                 return combined_score
 
             elif self.compare_method == 'l_by_l':
@@ -398,7 +388,7 @@ class genetic_Decompiler:
         
         # Calculate score for each QASM file
         scores = []
-        for i in range(2, 41):
+        for i in range(2, self.qubit_limit+1):
             qasm_file = os.path.join(qasm_dir, f"{self.algorithm_name}_{individual_index}_{i}.qasm")
             target_qasm_file = os.path.join(target_qasm_dir, f"{self.algorithm_name}_{i}.qasm")
              ## debug
@@ -407,9 +397,11 @@ class genetic_Decompiler:
             scores.append(score)
         
         # Return the average score
+        
         average_score = sum(scores) / len(scores) if scores else 0
         return average_score
             
+
     def run(self):
         if not self.perform_crossover and not self.perform_mutation:
             print("Warning: Both crossover and mutation are disabled; the population will not evolve.")
@@ -455,8 +447,8 @@ class genetic_Decompiler:
             new_population = []
 
             # Number of individuals to be generated by each method
-            crossover_count = int(self.pop_size * self.crossover_rate)
-            mutation_count = int(self.pop_size * self.mutation_rate)
+            crossover_count = int(self.pop_size * self.crossover_rate) if self.perform_crossover == True else 0
+            mutation_count = int(self.pop_size * self.mutation_rate) if self.perform_mutation == True else 0
             new_gen_count = int(self.pop_size * self.new_gen_rate)
             elite_count = self.pop_size - crossover_count - mutation_count - new_gen_count
 
@@ -471,21 +463,18 @@ class genetic_Decompiler:
                
                 new_population.extend([child1, child2])
 
-            # Ensure the population size is correct after crossover
-            new_population = new_population[:elite_count + crossover_count]
-
             # Apply mutation to new individuals
             for _ in range(mutation_count):
                 if new_population:
                     individual_to_mutate = random.choice(new_population)
-                    new_population.append(self.mutate_individual(individual_to_mutate))
+                    new_population.append(self.mutate(individual_to_mutate))
             
             # Generate new individuals
             new_population.extend(self.generate_initial_population(new_gen_count))
 
 
             # Ensure the population size is correct after all operations
-            new_population = new_population[:self.pop_size]
+            # new_population = new_population[:self.pop_size]
 
             population = new_population
 
