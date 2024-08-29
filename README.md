@@ -4,12 +4,7 @@
 
 This repository hosts the accompanying software for the following [master thesis](https://studenttheses.universiteitleiden.nl/handle/1887/4010640). 
 
-##### Abstract:
-
-For gate-based quantum computing, the design of quantum circuits is a critical procedure for implementing specific quantum algorithms. Currently, many quantum circuits are designed using Quantum Architecture Search, where heuristic algorithms are often applied, resulting in circuits that are not human-interpretable. To understand the underlying logic and specific patterns of the quantum circuits, we have developed a QASM-to-Qiskit transformation called the quantum decompiler. This transformation acts as a form of reverse engineering, converting the relatively low-level representation of a quantum circuit – the QASM file into a more understandable, high-level representation, the Python Qiskit code. To implement this method, we combined Genetic Algorithms (GA) and Abstract Syntax Trees (AST). In our work, we primarily focus on developing the concept and testing this proof-of-concept on some simple, commonly used quantum circuits (GHZ, QFT, QPE) with a limited number of qubits. At the end of this research, the metrics used for the evaluation of the output of our decompiler is also discussed.
-
-##### Masters thesis:
-
+**Abstract:** For gate-based quantum computing, the design of quantum circuits is a critical procedure for implementing specific quantum algorithms. Currently, many quantum circuits are designed using Quantum Architecture Search, where heuristic algorithms are often applied, resulting in circuits that are not human-interpretable. To understand the underlying logic and specific patterns of the quantum circuits, we have developed a QASM-to-Qiskit transformation called the quantum decompiler. This transformation acts as a form of reverse engineering, converting the relatively low-level representation of a quantum circuit – the QASM file into a more understandable, high-level representation, the Python Qiskit code. To implement this method, we combined Genetic Algorithms (GA) and Abstract Syntax Trees (AST). In our work, we primarily focus on developing the concept and testing this proof-of-concept on some simple, commonly used quantum circuits (GHZ, QFT, QPE) with a limited number of qubits. At the end of this research, the metrics used for the evaluation of the output of our decompiler is also discussed.
 
 ### Software
 
