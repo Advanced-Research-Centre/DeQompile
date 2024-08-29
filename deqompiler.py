@@ -2,57 +2,15 @@ import ast
 import random
 from sympy import *
 
-# from tqdm import tqdm
-# import subprocess
-# import os
-# import shutil
-# import importlib.util
-# from circuit_generation import *
-# from qiskit import QuantumCircuit, Aer, transpile
-# from qiskit.quantum_info import Operator, state_fidelity
-# # import Levenshtein
-# from pprint import pprint
-# from graphviz import Digraph
-
-# Define example operations and number of nodes
 rotation_gates = ['rx', 'ry', 'rz', 'u1', 'u2', 'u3', 'crx', 'cry', 'crz', 'cp', 'cu1', 'cu3']
 multi_qubit_gates = ['cx', 'cz', 'swap', 'ch', 'csx', 'cy', 'ccx', 'cswap', 'cu', 'cp']
-three_qubit_gates = ['ccx', 'cswap']  # Toffoli (CCX) gate and Fredkin (CSWAP) gate
-loop_prob = 0.1
+three_qubit_gates = ['ccx', 'cswap']
+loop_prob = 0.99
 
-def loop_index(depth):
-    if depth == 1:
-        return ast.Name(id='n', ctx=ast.Load())
-    else:
-        # Generate variable names for loop indices
-        vars = [f"i{ind}" for ind in range(depth-1)]
-        choices = [ast.Name(id='n', ctx=ast.Load())]+\
-        [ast.Name(id=var, ctx=ast.Load()) for var in vars]
-
-        # Start with a random variable
-        expr = random.choice(choices)
-
-        # Add binary operations
-        for _ in range(depth - 1):
-            left = expr
-            right = random.choice(choices)
-            op = random.choice([ast.Add(), ast.Sub()])
-            expr = ast.BinOp(left=left, op=op, right=right)
-
-        # Random value to add/subtract
-        value = random.randint(0, depth-1)  # Using a random integer instead of string
-        index = ast.BinOp(left=expr, op=random.choice([ast.Add(), ast.Sub()]), 
-                          right=ast.Constant(value=value))
-
-        return ast.Call(
-            func=ast.Name(id='abs', ctx=ast.Load()),
-            args=[index],
-            keywords=[])
-    
-
-
-def random_expr(depth, max_expr_operators, var_depth):
-    """Generate a random qubit index expression using arithmetic, modulus, or simple variables.
+def random_expr(curr_loop_depth, max_expr_operators, var_depth):
+    """
+    Generate a random expression using arithmetic, modulus, or simple variables.
+    This expr is used both for qubit indexing and phase
 
     Args:
         depth (int): Number of loop variables.
@@ -60,29 +18,27 @@ def random_expr(depth, max_expr_operators, var_depth):
         var_depth (int): Number of additional variables.
     """
     # Generate variable names for loop indices and variables
-    loop_vars = [f"i{ind}" for ind in range(depth)]
+    loop_vars = [f"i{ind}" for ind in range(curr_loop_depth)]
     vars = ['n']+[f"{ind}" for ind in range(var_depth+1)]
 
     # All possible variables include 'n' and loop indices
-    choices = [ast.Name(id='n', ctx=ast.Load())] + \
-              [ast.Name(id=var, ctx=ast.Load()) for var in loop_vars ]
+    choices = [ast.Name(id='n', ctx=ast.Load())] + [ast.Name(id=var, ctx=ast.Load()) for var in loop_vars ]
 
     # Start with a random variable
     # expr = ast.Name(id=random.choice(vars),ctx=ast.Load())
-    expr=random.choice(choices)
+    expr = random.choice(choices)
     # Add binary operations
     for _ in range(max_expr_operators+1):
         left = expr
         right = ast.Name(id=random.choice(vars),ctx=ast.Load())
         op = random.choice([ast.Add(), ast.Sub()])
         expr = ast.BinOp(left=left, op=op, right=right)
-    return expr
-    # Apply modulo operation to ensure the result is within valid index range
+    return expr    
 
 def random_qubit_expr(curr_loop_depth, num_ops, num_vars):
     
     qubit_expr = random_expr(curr_loop_depth, num_ops, num_vars)
-    mod_qubit_expr = ast.BinOp(left=qubit_expr, op=ast.Mod(), right=ast.Name(id='n', ctx=ast.Load()))
+    mod_qubit_expr = ast.BinOp(left=qubit_expr, op=ast.Mod(), right=ast.Name(id='n', ctx=ast.Load()))   # Apply modulo operation to ensure the result is within valid index range
     sympl_qubit_expr = ast.parse(str(simplify(ast.unparse(mod_qubit_expr)))).body[0].value
     # print("Simplified expression:",ast.unparse(mod_qubit_expr),"--->",ast.unparse(sympl_qubit_expr))
     return sympl_qubit_expr
@@ -139,6 +95,35 @@ def random_phase_expr(depth):
     sympl_phase_expr = ast.parse(str(simplify(ast.unparse(phase_expr)))).body[0].value
     return sympl_phase_expr
 
+def loop_index(depth):
+    if depth == 0:
+        return ast.Name(id='n', ctx=ast.Load())
+    else:
+        # Generate variable names for loop indices
+        vars = [f"i{ind}" for ind in range(depth)]
+        choices = [ast.Name(id='n', ctx=ast.Load())]+\
+        [ast.Name(id=var, ctx=ast.Load()) for var in vars]
+
+        # Start with a random variable
+        expr = random.choice(choices)
+
+        # Add binary operations
+        for _ in range(depth):
+            left = expr
+            right = random.choice(choices)
+            op = random.choice([ast.Add(), ast.Sub()])
+            expr = ast.BinOp(left=left, op=op, right=right)
+
+        # Random value to add/subtract
+        value = random.randint(0, depth)  # Using a random integer instead of string
+        index = ast.BinOp(left=expr, op=random.choice([ast.Add(), ast.Sub()]), 
+                          right=ast.Constant(value=value))
+
+        return ast.Call(
+            func=ast.Name(id='abs', ctx=ast.Load()),
+            args=[index],
+            keywords=[])
+    
 def random_qiskit_ast_gate(operations, curr_loop_depth, num_ops, num_vars):
     gate = random.choice(operations)
     index1 = random_qubit_expr(curr_loop_depth, num_ops, num_vars)
@@ -174,7 +159,6 @@ def random_qiskit_ast_gate(operations, curr_loop_depth, num_ops, num_vars):
             ))
     return gate_call
 
-
 def random_qiskit_ast_body(body, operations, num_nodes, max_loop_depth, curr_loop_depth = 0):
     """
     Generate a random quantum algorithm body.
@@ -184,65 +168,25 @@ def random_qiskit_ast_body(body, operations, num_nodes, max_loop_depth, curr_loo
     """
 
     for i in range(num_nodes):
-        gate = random.choice(operations)
-        if random.random() < loop_prob:       # Randomly decide to use a loop or a single operation
-            loop_body = []
-    
+        if random.random() < loop_prob:       # Randomly decide node is a loop or a gate operation
+
+            loop_body = []    
             loop_depth = random.randint(1, max_loop_depth)
             loop_vars = [f"i{ind}" for ind in range(loop_depth)]
             current_body = loop_body  # Initialize current_body to loop_body
-            depth = curr_loop_depth
             for j in range(loop_depth):
-                depth += 1
                 loop = ast.For(
-                    target=ast.Name(id=loop_vars[depth-1], ctx=ast.Store()),
-                    iter=ast.Call(func=ast.Name(id='range', ctx=ast.Load()), args=[loop_index(depth)], keywords=[]),  # Use loop_index here
+                    target=ast.Name(id=loop_vars[j], ctx=ast.Store()),
+                    iter=ast.Call(func=ast.Name(id='range', ctx=ast.Load()), args=[loop_index(j)], keywords=[]),  # Use loop_index here
                     body=[],
                     orelse=[]
                 )
-                current_body.append(loop)  # Append loop to the current body
-                current_body = loop.body  # Update current_body to the new loop's body
+                current_body.append(loop)   # Append loop to the current body
+                current_body = loop.body    # Update current_body to the new loop's body
 
-            choices = [ast.Name(id='n', ctx=ast.Load())] + [ast.Name(id=var, ctx=ast.Load()) for var in loop_vars]
-            qubit_index = random.choice(choices)
-
-            # WATSON: recursive call
-
-            ### if multiple qubits
-            if gate in multi_qubit_gates:
-                target_expr = random_expr(depth, 2, 3)
-                target_qubit_index = random_qubit_expr(target_expr)
-                ### if rotation
-                if gate in rotation_gates:
-                    phase = random_phase_expr(depth)
-                    gate_call = ast.Expr(value=ast.Call(
-                        func=ast.Attribute(value=ast.Name(id="qc", ctx=ast.Load()), attr=gate, ctx=ast.Load()),
-                        args=[phase, qubit_index, target_qubit_index],
-                        keywords=[]
-                    ))
-                else:
-                    gate_call = ast.Expr(value=ast.Call(
-                        func=ast.Attribute(value=ast.Name(id="qc", ctx=ast.Load()), attr=gate, ctx=ast.Load()),
-                        args=[qubit_index, target_qubit_index],
-                        keywords=[]
-                    ))
-            else:
-                if gate in rotation_gates:
-                    phase = random_phase_expr(depth)
-                    gate_call = ast.Expr(value=ast.Call(
-                        func=ast.Attribute(value=ast.Name(id="qc", ctx=ast.Load()), attr=gate, ctx=ast.Load()),
-                        args=[phase, qubit_index],
-                        keywords=[]
-                    ))
-                else:
-                    gate_call = ast.Expr(value=ast.Call(
-                        func=ast.Attribute(value=ast.Name(id="qc", ctx=ast.Load()), attr=gate, ctx=ast.Load()),
-                        args=[qubit_index],
-                        keywords=[]
-                    ))
-
-            current_body.append(gate_call)
+            current_body.append(random_qiskit_ast_gate(operations, loop_depth, 2, 3))
             body.extend(loop_body)
+            
         else:
             body.append(random_qiskit_ast_gate(operations, curr_loop_depth, 1, 2))
 
@@ -298,7 +242,7 @@ def random_qiskit_ast_generator(operations, num_nodes, max_loop_depth):
 if __name__ == "__main__":
 
     operations = ['h', 'x', 'cx', 'rx', 'ry', 'rz']
-    module = random_qiskit_ast_generator(operations=operations, num_nodes=3, max_loop_depth=1)    # max_loop_depth=0 sometimes gives error
+    module = random_qiskit_ast_generator(operations=operations, num_nodes=2, max_loop_depth=2)    # max_loop_depth=0 sometimes gives error
     print(ast.unparse(module))
     # print()
     # pprint(ast.dump(module, indent=4))
