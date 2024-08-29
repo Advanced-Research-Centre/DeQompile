@@ -22,7 +22,7 @@ If you find the repository useful, please consider citing:
 @misc{deqompiler,
   author={Xie, Shubing and Sarkar, Aritra},
   title={DeQompiler: Genetic Programming based QASM-to-Qiskit decompiler},
-  howpublished={\url{[https://github.com/Advanced-Research-Centre/QART](https://github.com/Advanced-Research-Centre/DeQompile)}},
+  howpublished={\url{[https://github.com/Advanced-Research-Centre/DeQompile](https://github.com/Advanced-Research-Centre/DeQompile)}},
   year={2024}
 }
 ```
