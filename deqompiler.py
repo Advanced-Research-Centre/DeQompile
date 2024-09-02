@@ -3,6 +3,8 @@ from q_ast_gen import random_qiskit_ast_generator
 import os
 import time
 from tqdm import tqdm
+import ast
+import shutil
 
 class gp_deqompiler:
     """
@@ -27,10 +29,82 @@ class gp_deqompiler:
         self.selection_method = selection_method
         self.operations=operations
         # Initialize the path for saving files related to the algorithm
-        self.path = os.path.join('genetic_deQ', self.algorithm_name)
-        self.qasm_path=os.path.join('genetic_deQ_qasm', self.algorithm_name)
+        self.path = os.path.join('db_qiskit', self.algorithm_name)
+        self.qasm_path = os.path.join('db_qasm', self.algorithm_name)
         os.makedirs(self.path, exist_ok=True)  # Create the directory if it does not exist
         os.makedirs(self.qasm_path, exist_ok=True) 
+
+    def save_qasm(self):
+        for filename in os.listdir(self.path):
+            if filename.endswith('.py'):
+                full_py_path = os.path.join(self.path, filename)
+                
+                with open(full_py_path, 'r') as file:
+                    module_code = file.read()
+
+                local_namespace = {}
+                exec(module_code, local_namespace)
+                
+                # Set up the directory for QASM files
+                file_base_name = filename[:-3]  # Remove '.py' extension
+                qasm_dir_path = os.path.join(self.qasm_path, file_base_name)
+                os.makedirs(qasm_dir_path, exist_ok=True)
+                
+                # Generate QASM files for each qubit count
+                for i in range(2, self.qubit_limit + 1):
+                    try:
+                        qc = local_namespace['generate_random_circuit_ast'](i)
+                        
+                        # Check and modify cx gates if necessary
+                        modified_circuit = QuantumCircuit(qc.num_qubits)
+                        for gate, qargs, cargs in qc.data:
+                            if gate.name == 'cx':
+                                control_qubit, target_qubit = qargs
+                                if control_qubit.index == target_qubit.index:
+                                    # Adjust target qubit index to be different from control qubit index
+                                    target_qubit = qc.qubits[(target_qubit.index + 1) % qc.num_qubits]
+                                    modified_circuit.cx(control_qubit, target_qubit)
+                                else:
+                                    modified_circuit.cx(control_qubit, target_qubit)
+                            else:
+                                modified_circuit.append(gate, qargs, cargs)
+                        
+                        qasm_output = modified_circuit.qasm()
+                    except (CircuitError, ZeroDivisionError) as e:
+                    # Handle both CircuitError and ZeroDivisionError
+                    # print(f"Error generating QASM for {filename} with {i} qubits: {e}")
+                        qasm_output = ""  # Save an empty QASM file if there's an error
+                    
+                    qasm_filename = os.path.join(qasm_dir_path, f"{file_base_name}_{i}.qasm")
+                    with open(qasm_filename, 'w') as f:
+                        f.write(qasm_output)
+
+    def save_qiskit(self, population, generation):
+        """
+        Iterate over the population and save each individual's Python-Qiskit code to a file
+        """
+        for index, individual in enumerate(population):
+            # Convert AST to Python code
+            qiskit_code = ast.unparse(individual)
+            # Create the filename, including the algorithm name and index
+            filename = os.path.join(self.path, f"{generation}_{index}.py")
+            # Write Python code to the file
+            with open(filename, 'w') as file:
+                file.write(qiskit_code)
+
+    def clear_files(self):
+        """
+        Clear all files (and subdirectories) in the target directory before saving new files
+        """
+        for content in os.listdir(self.path):
+            content_path = os.path.join(self.path, content)
+            try:
+                # if os.path.isfile(content_path) or os.path.islink(content_path):  # Remove file
+                os.unlink(content_path)         
+                # elif os.path.isdir(content_path):                                 # Remove directory
+                    # shutil.rmtree(content_path)     
+            except Exception as e:
+                print(f'Failed to delete {content_path}. Reason: {e}')
 
     def run(self):
         
@@ -46,12 +120,15 @@ class gp_deqompiler:
             ast_circuit = random_qiskit_ast_generator(operations=self.operations,max_num_nodes=self.max_length,max_loop_depth=self.max_loop_depth)
             population.append(ast_circuit)
 
+        self.clear_files()
+
         for generation in range(self.generations):
             start_time = time.time()
 
-        #     # Save the current population state and QASM data
-        #     self.save(population)
-        #     self.save_qasm()
+            # Save the current population state
+            self.save_qiskit(population, generation)
+            # Save QASM output for each individual for range of n values
+            self.save_qasm()
 
         #     # Evaluate fitness for each individual
         #     # [print(index) for index, individual in enumerate(population)]
@@ -122,12 +199,12 @@ class gp_deqompiler:
 if __name__ == "__main__":
 
     operations = ['h', 'x', 'rx', 'ry', 'rz']
-    generations = 10
+    generations = 3
     algorithm_name = 'rx_c'
     compare_method = 'seq_similarity'
     perform_crossover = False
     perform_mutation = True
-    pop_size = 100
+    pop_size = 8
     new_gen_rate = 0.6
     
     decompiler = gp_deqompiler(operations=operations,generations=generations,algorithm_name=algorithm_name,compare_method=compare_method,
@@ -136,3 +213,4 @@ if __name__ == "__main__":
     best_code, best_score, best_generation_index = decompiler.run()
     
     print(best_code, '\n', best_score, '\n',best_generation_index)
+    # 
