@@ -53,7 +53,7 @@ class gp_deqompiler:
                 # Generate QASM files for each qubit count
                 for i in range(2, self.qubit_limit + 1):
                     try:
-                        qc = local_namespace['generate_random_circuit_ast'](i)
+                        qc = local_namespace['quantum_algorithm'](i)
                         
                         # Check and modify cx gates if necessary
                         modified_circuit = QuantumCircuit(qc.num_qubits)
