@@ -5,6 +5,7 @@ import time
 from tqdm import tqdm
 import ast
 import shutil
+from qiskit import QuantumCircuit, qasm2
 
 class gp_deqompiler:
     """
@@ -14,70 +15,24 @@ class gp_deqompiler:
     def __init__(self, algorithm_name, qubit_limit=20, generations=100, pop_size=50, max_length=10, perform_crossover=True,
                 crossover_rate=0.3, new_gen_rate=0.2,mutation_rate=0.1,compare_method='l_by_l',max_loop_depth=2,
                   perform_mutation=True, selection_method='tournament',operations = ['h', 'x', 'cx']):
-        self.algorithm_name = algorithm_name
-        self.qubit_limit = qubit_limit
-        self.generations = generations
-        self.pop_size = pop_size
-        self.max_length = max_length
-        self.crossover_rate=crossover_rate
-        self.mutation_rate=mutation_rate
-        self.new_gen_rate=new_gen_rate
+        self.algorithm_name = algorithm_name # Name of the algorithm being decompiled
+        self.qubit_limit = qubit_limit  # Maximum number of qubits to consider (size of training set)
+        self.generations = generations # Number of generations to run the GP
+        self.pop_size = pop_size # Population size
+        self.max_length = max_length # Maximum number of nodes of the AST for generated individuals
+        self.crossover_rate=crossover_rate # Rate of crossover operation
+        self.mutation_rate=mutation_rate # Rate of mutation operation
+        self.new_gen_rate=new_gen_rate 
         self.max_loop_depth=max_loop_depth
-        self.perform_crossover = perform_crossover
+        self.perform_crossover = perform_crossover # Perform crossover operation
         self.compare_method=compare_method
-        self.perform_mutation = perform_mutation
-        self.selection_method = selection_method
-        self.operations=operations
-        # Initialize the path for saving files related to the algorithm
-        self.path = os.path.join('db_qiskit', self.algorithm_name)
-        self.qasm_path = os.path.join('db_qasm', self.algorithm_name)
-        os.makedirs(self.path, exist_ok=True)  # Create the directory if it does not exist
-        os.makedirs(self.qasm_path, exist_ok=True) 
-
-    def save_qasm(self):
-        for filename in os.listdir(self.path):
-            if filename.endswith('.py'):
-                full_py_path = os.path.join(self.path, filename)
-                
-                with open(full_py_path, 'r') as file:
-                    module_code = file.read()
-
-                local_namespace = {}
-                exec(module_code, local_namespace)
-                
-                # Set up the directory for QASM files
-                file_base_name = filename[:-3]  # Remove '.py' extension
-                qasm_dir_path = os.path.join(self.qasm_path, file_base_name)
-                os.makedirs(qasm_dir_path, exist_ok=True)
-                
-                # Generate QASM files for each qubit count
-                for i in range(2, self.qubit_limit + 1):
-                    try:
-                        qc = local_namespace['quantum_algorithm'](i)
-                        
-                        # Check and modify cx gates if necessary
-                        modified_circuit = QuantumCircuit(qc.num_qubits)
-                        for gate, qargs, cargs in qc.data:
-                            if gate.name == 'cx':
-                                control_qubit, target_qubit = qargs
-                                if control_qubit.index == target_qubit.index:
-                                    # Adjust target qubit index to be different from control qubit index
-                                    target_qubit = qc.qubits[(target_qubit.index + 1) % qc.num_qubits]
-                                    modified_circuit.cx(control_qubit, target_qubit)
-                                else:
-                                    modified_circuit.cx(control_qubit, target_qubit)
-                            else:
-                                modified_circuit.append(gate, qargs, cargs)
-                        
-                        qasm_output = modified_circuit.qasm()
-                    except (CircuitError, ZeroDivisionError) as e:
-                    # Handle both CircuitError and ZeroDivisionError
-                    # print(f"Error generating QASM for {filename} with {i} qubits: {e}")
-                        qasm_output = ""  # Save an empty QASM file if there's an error
-                    
-                    qasm_filename = os.path.join(qasm_dir_path, f"{file_base_name}_{i}.qasm")
-                    with open(qasm_filename, 'w') as f:
-                        f.write(qasm_output)
+        self.perform_mutation = perform_mutation # Perform mutation operation
+        self.selection_method = selection_method 
+        self.operations=operations # List of quantum operations to consider in the AST
+        self.db_qiskit_path = os.path.join('db_qiskit_decompiled', self.algorithm_name) # Path to save the generated Qiskit codes (unparsed ASTs) for each generation's, each individual
+        os.makedirs(self.db_qiskit_path, exist_ok=True) # Create the directory if it does not exist
+        self.db_qasm_path = os.path.join('db_qasm_decompiled_tmp') # Path to temporary save the generated QASM codes for each problem size for evaluating fitness for an individual
+        os.makedirs(self.db_qasm_path, exist_ok=True) # Create the directory if it does not exist
 
     def save_qiskit(self, population, generation):
         """
@@ -87,17 +42,78 @@ class gp_deqompiler:
             # Convert AST to Python code
             qiskit_code = ast.unparse(individual)
             # Create the filename, including the algorithm name and index
-            filename = os.path.join(self.path, f"{generation}_{index}.py")
+            filename = os.path.join(self.db_qiskit_path, f"g{generation}_i{index}.py")
             # Write Python code to the file
             with open(filename, 'w') as file:
                 file.write(qiskit_code)
 
+    def save_qasm(self, generation, index):
+
+        decompiled_file_name = os.path.join(self.db_qiskit_path, f"g{generation}_i{index}.py")
+        with open(decompiled_file_name, 'r') as file:
+            module_code = file.read()
+        local_namespace = {}
+        exec(module_code, local_namespace)
+
+        for i in range(2, self.qubit_limit + 1):
+            try:
+                qc = local_namespace['quantum_algorithm'](i)
+                # Check and ignore cx gates if target and control same
+                modified_circuit = QuantumCircuit(qc.num_qubits)
+                for gate, qargs, cargs in qc.data:
+                    if gate.name == 'cx':
+                        control_qubit, target_qubit = qargs
+                        if control_qubit.index != target_qubit.index:
+                            modified_circuit.cx(control_qubit, target_qubit)
+                        else:
+                            modified_circuit.x(target_qubit) # Not removed to prevent syntax error if only statement within for
+                        #     # Adjust target qubit index to be different from control qubit index
+                        #     target_qubit = qc.qubits[(target_qubit.index + 1) % qc.num_qubits]
+                        #     modified_circuit.cx(control_qubit, target_qubit)
+                    else:
+                        modified_circuit.append(gate, qargs, cargs)
+                qasm_output = qasm2.dumps(modified_circuit)  
+            except (ZeroDivisionError) as e:
+            # Handle both CircuitError and ZeroDivisionError
+            # print(f"Error generating QASM for {filename} with {i} qubits: {e}")
+                qasm_output = ""  # Save an empty QASM file if there's an error
+                print("ZeroDivisionError in g",generation," i",index," q",i)
+
+            qasm_filename = os.path.join(self.db_qasm_path, f"q{i}.qasm")
+            with open(qasm_filename, 'w') as f:
+                f.write(qasm_output)
+
+    def evaluate(self, generation, index):
+        """
+        Given a Qiskit AST, generate QASM code for different qubit counts and compare with target QASM code
+        """
+        # Save QASM output for each individual for range of n values
+        self.save_qasm(generation, index)
+        return 0
+        qasm_dir = os.path.join(self.db_qasm_path)
+        training_qasm_dir = "Circuits"
+        
+        # Calculate score for each QASM file
+        scores = []
+        for i in range(2, self.qubit_limit+1):
+            qasm_file = os.path.join(qasm_dir, f"{self.algorithm_name}_{individual_index}_{i}.qasm")
+            target_qasm_file = os.path.join(target_qasm_dir, f"{self.algorithm_name}_{i}.qasm")
+             ## debug
+            # print(qasm_file,target_qasm_file)
+            score = self.compare_qasm(qasm_file, target_qasm_file)
+            scores.append(score)
+        
+        # Return the average score
+        
+        average_score = sum(scores) / len(scores) if scores else 0
+        return average_score
+    
     def clear_files(self):
         """
         Clear all files (and subdirectories) in the target directory before saving new files
         """
-        for content in os.listdir(self.path):
-            content_path = os.path.join(self.path, content)
+        for content in os.listdir(self.db_qiskit_path):
+            content_path = os.path.join(self.db_qiskit_path, content)
             try:
                 # if os.path.isfile(content_path) or os.path.islink(content_path):  # Remove file
                 os.unlink(content_path)         
@@ -127,13 +143,10 @@ class gp_deqompiler:
 
             # Save the current population state
             self.save_qiskit(population, generation)
-            # Save QASM output for each individual for range of n values
-            self.save_qasm()
 
-        #     # Evaluate fitness for each individual
-        #     # [print(index) for index, individual in enumerate(population)]
-        #     fitness_scores = [self.evaluate(individual, index) for index, individual in enumerate(population)]
-        #     print("Fitness scores:", fitness_scores)  # Debugging line
+            # Evaluate fitness for each individual
+            fitness_scores = [self.evaluate(generation, index) for index in range(0, self.pop_size)]
+            print("Fitness scores:", fitness_scores)  # Debugging line
 
         #      # Sort population by fitness (descending order)
         #     sorted_population = sorted(zip(fitness_scores, population), key=lambda pair: pair[0], reverse=True)
@@ -213,4 +226,3 @@ if __name__ == "__main__":
     best_code, best_score, best_generation_index = decompiler.run()
     
     print(best_code, '\n', best_score, '\n',best_generation_index)
-    # 

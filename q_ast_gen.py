@@ -38,7 +38,13 @@ def random_expr(curr_loop_depth, max_expr_operators, var_depth):
 def random_qubit_expr(curr_loop_depth, num_ops, num_vars):
     
     qubit_expr = random_expr(curr_loop_depth, num_ops, num_vars)
-    mod_qubit_expr = ast.BinOp(left=qubit_expr, op=ast.Mod(), right=ast.Name(id='n', ctx=ast.Load()))   # Apply modulo operation to ensure the result is within valid index range
+    # mod_qubit_expr = ast.BinOp(left=qubit_expr, op=ast.Mod(), right=ast.Name(id='n', ctx=ast.Load()))   # Apply modulo operation to ensure the result is within valid index range
+    # mod_qubit_expr = ast.UnaryOp(op=int(), operand =  ast.BinOp(left=qubit_expr, op=ast.Mod(), right=ast.Name(id='n', ctx=ast.Load())))
+    mod_qubit_expr = ast.Call(
+            func=ast.Name(id='int', ctx=ast.Load()),
+            args=[ast.BinOp(left=qubit_expr, op=ast.Mod(), right=ast.Name(id='n', ctx=ast.Load()))],
+            keywords=[])
+    
     sympl_qubit_expr = ast.parse(str(simplify(ast.unparse(mod_qubit_expr)))).body[0].value
     # print("Simplified expression:",ast.unparse(mod_qubit_expr),"--->",ast.unparse(sympl_qubit_expr))
     return sympl_qubit_expr
@@ -197,6 +203,7 @@ def random_qiskit_ast_generator(operations, max_num_nodes, max_loop_depth):
     import_def = [
         ast.ImportFrom(module='qiskit', names=[ast.alias(name='QuantumCircuit', asname=None)], level=0),
         ast.ImportFrom(module='math', names=[ast.alias(name='pi', asname=None)], level=0),
+        ast.ImportFrom(module='sympy', names=[ast.alias(name='Mod', asname=None)], level=0),
         ast.Import(names=[ast.alias(name='numpy', asname='np')]),
         ast.Import(names=[ast.alias(name='random', asname=None)])
     ]

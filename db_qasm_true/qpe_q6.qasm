@@ -1,0 +1,23 @@
+OPENQASM 2.0;
+include "qelib1.inc";
+gate gate_IQFT_dg q0,q1,q2,q3,q4 { swap q1,q3; swap q0,q4; h q0; cp(-pi/2) q1,q0; h q1; cp(-pi/4) q2,q0; cp(-pi/2) q2,q1; h q2; cp(-pi/8) q3,q0; cp(-pi/4) q3,q1; cp(-pi/2) q3,q2; h q3; cp(-pi/16) q4,q0; cp(-pi/8) q4,q1; cp(-pi/4) q4,q2; cp(-pi/2) q4,q3; h q4; }
+qreg q[5];
+qreg psi[1];
+creg c[5];
+x psi[0];
+h q[0];
+h q[1];
+h q[2];
+h q[3];
+h q[4];
+cp(-7*pi/8) psi[0],q[0];
+cp(pi/4) psi[0],q[1];
+cp(pi/2) psi[0],q[2];
+cp(pi) psi[0],q[3];
+gate_IQFT_dg q[0],q[1],q[2],q[3],q[4];
+barrier q[0],q[1],q[2],q[3],q[4],psi[0];
+measure q[0] -> c[0];
+measure q[1] -> c[1];
+measure q[2] -> c[2];
+measure q[3] -> c[3];
+measure q[4] -> c[4];
