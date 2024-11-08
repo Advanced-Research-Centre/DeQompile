@@ -9,15 +9,15 @@ from qiskit import QuantumCircuit, qasm2
 import Levenshtein
 import random
 from copy import deepcopy
+from qiskit.circuit import CircuitError
 
 class gp_deqompiler:
     """
     Genetic Programming based QASM-Qiskit Decompiler
     Uses Qiskit AST Generator to generate initial population
     """
-    def __init__(self, algorithm_name, qubit_limit=20, generations=100, pop_size=50, max_length=10, perform_crossover=True,
-                crossover_rate=0.3, new_gen_rate=0.2,mutation_rate=0.1,compare_method='l_by_l',max_loop_depth=2,
-                  perform_mutation=True, selection_method='tournament',operations = ['h', 'x', 'cx']):
+    def __init__(self, algorithm_name, qubit_limit=20, generations=100, pop_size=50, max_length=10, max_loop_depth=2, operations=['h', 'x', 'cx'], compare_method='l_by_l', perform_crossover=True, crossover_rate=0.3, selection_method='tournament', perform_mutation=True, mutation_rate=0.1, new_gen_rate=0.2):
+
         self.algorithm_name = algorithm_name # Name of the algorithm being decompiled
         self.qubit_limit = qubit_limit  # Maximum number of qubits to consider (size of training set)
         self.generations = generations # Number of generations to run the GP
@@ -61,35 +61,42 @@ class gp_deqompiler:
         for i in range(2, self.qubit_limit + 1):
             try:
                 qc = local_namespace['quantum_algorithm'](i)
-                # print(qc.operations())
-                # Check and ignore cx gates if target and control same
-                modified_circuit = QuantumCircuit(qc.num_qubits)
-                for ins in qc.data:
-                    gate, qargs, cargs = ins.operation, ins.qubits, ins.clbits
-                    if gate.name == 'cx':
-                        control_qubit, target_qubit = qargs
-                        if control_qubit.index != target_qubit.index:
-                            modified_circuit.cx(control_qubit, target_qubit)
-                        else:
-                            # Option 1: Remove conflicting control and make U-gate
-                            modified_circuit.x(target_qubit) 
-                            # Option 2: Remove gate
-                            # Problem: Syntax error if only statement within for loop
-                            # Option 3: Adjust target qubit index to be different from control qubit index
-                            # target_qubit = qc.qubits[(target_qubit.index + 1) % qc.num_qubits]
-                            # modified_circuit.cx(control_qubit, target_qubit)
-                    else:
-                        modified_circuit.append(gate, qargs, cargs)
-                qasm_output = qasm2.dumps(modified_circuit)  
+
+                # # Handle if target and control same
+                # modified_circuit = QuantumCircuit(i)
+                # for ins in qc.data:
+                #     gate, qargs, cargs = ins.operation, ins.qubits, ins.clbits
+                #     if gate.name == 'cx':
+                #         control_qubit, target_qubit = qargs
+                #         if control_qubit._index != target_qubit._index:
+                #             modified_circuit.cx(control_qubit, target_qubit)
+                #         else:
+                #             print("TBD: if CircuitError, this line is never reached")
+                #             # Option 1: Remove conflicting control and make U-gate
+                #             modified_circuit.x(target_qubit)                 
+                #             # Option 2: Remove gate
+                #             # Problem: Syntax error if only statement within for loop
+                #             # Option 3: Adjust target qubit index to be different from control qubit index
+                #             # target_qubit = qc.qubits[(target_qubit.index + 1) % qc.num_qubits]
+                #             # modified_circuit.cx(control_qubit, target_qubit)
+                #     else:
+                #         modified_circuit.append(gate, qargs, cargs)
+                # qasm_output = qasm2.dumps(modified_circuit)  
             except (ZeroDivisionError) as e:
-                # TBD: Handle both CircuitError and ZeroDivisionError
                 qasm_output = ""  # Save an empty QASM file if there's an error
                 # print("ZeroDivisionError in g",generation," i",index," q",i," error:",e)
                 # TBD: Division by zero occuring a lot for angle expr
-
-            qasm_filename = os.path.join(self.db_qasm_path, f"q{i}.qasm")
-            with open(qasm_filename, 'w') as f:
-                f.write(qasm_output)
+            except (CircuitError) as e:
+                qasm_output = ""  # Save an empty QASM file if there's an error
+                # print("CircuitError in g",generation," i",index," q",i," error:",e)
+                # TBD: Duplicate qubit argument occuring a lot for cx in GHZ
+                # TBD: REGEX change CX in module_code and execute again
+            else:
+                qasm_output = qasm2.dumps(qc) 
+            finally:
+                qasm_filename = os.path.join(self.db_qasm_path, f"q{i}.qasm")
+                with open(qasm_filename, 'w') as f:
+                    f.write(qasm_output)
 
     def qasm_to_unitary(self, qasm_file_path):
         # Read QASM file and create a quantum circuit
@@ -175,7 +182,6 @@ class gp_deqompiler:
             return 0
 
         try:
-            # TBD: Set base score to length of decompiled file (to force shorter programs)
             
             if self.compare_method == 'fidelity':
                 # Calculate unitary matrices for both QASM files
@@ -242,6 +248,19 @@ class gp_deqompiler:
             return 0   
         return score
 
+    def est_description_complexity(self, generation, index):
+        """
+        Estimate description complexity of decompiled file (to score shorter programs higher)
+        """
+        # Count number of nodes in AST.
+        decompiled_file_name = os.path.join(self.db_qiskit_path, f"g{generation}_i{index}.py")
+        with open(decompiled_file_name, 'r') as file:
+            module_code = file.read()
+        ast_length = len(ast.parse(module_code).body[-1].body)
+        # Normalize by self.max_length
+        penalty = - ast_length / (2*self.max_length)  # 2x because length can increase due to crossover
+        return penalty
+
     def evaluate(self, generation, index):
         """
         Given a Qiskit AST, generate QASM code for different qubit counts and compare with target QASM code
@@ -254,16 +273,18 @@ class gp_deqompiler:
             decompiler_qasm_file = os.path.join(self.db_qasm_path, f"q{i}.qasm")
             true_qasm_file = os.path.join('db_qasm_true', f"{self.algorithm_name}_q{i}.qasm")
             scores.append(self.compare_qasm(decompiler_qasm_file, true_qasm_file))
+        # Set base score to length of decompiled file (to force shorter programs)
+        kc = self.est_description_complexity(generation, index)
+        
         # Return the average score
-        return sum(scores) / len(scores) if scores else 0
+        return kc + (sum(scores) / len(scores)) if scores else 0
     
-    def clear_files(self):
-        # TBD: Take as argument which folder to clear
+    def clear_files(self, dir):
         """
         Clear all files (and subdirectories) in the target directory before saving new files
         """
-        for content in os.listdir(self.db_qiskit_path):
-            content_path = os.path.join(self.db_qiskit_path, content)
+        for content in os.listdir(dir):
+            content_path = os.path.join(dir, content)
             try:
                 # if os.path.isfile(content_path) or os.path.islink(content_path):  # Remove file
                 os.unlink(content_path)         
@@ -277,23 +298,24 @@ class gp_deqompiler:
         ast_circuit_copy = deepcopy(ast_circuit)
 
         # Randomly select mutation position
-        num_operations = len(ast_circuit_copy.body[0]) - 1
+        num_operations = len(ast_circuit_copy.body[1].body) - 1 # Last element is return (thus -1)
         mutation_index = random.randint(1, num_operations - 1)
         
+        # Generate level 1 AST (gate, for, nested-for), and strip of the qc defn (loc -3) and return (loc -1)
+        new_sub_ast = random_qiskit_ast_generator(operations=self.operations, max_num_nodes=1, max_loop_depth=self.max_loop_depth).body[1].body[-2]  
+            
         # Randomly select mutation type
         mutation_type = random.choice(['insert', 'modify'])
         
         if mutation_type == 'insert':
-            # Insert a new quantum gate
-            new_gate_ast = random_qiskit_ast_generator(1, self.operations)  # Generate AST for one random gate
-            ast_circuit_copy.body[0].body.insert(mutation_index, new_gate_ast.body[0].body[1])  # Insert the new gate
+            # Insert the new sub-ast
+            ast_circuit_copy.body[1].body.insert(mutation_index, new_sub_ast)
             
         elif mutation_type == 'modify':
             # Modify an existing quantum gate
-            existing_gate = ast_circuit_copy.body[mutation_index]
-            if isinstance(existing_gate, ast.Expr):
-                new_gate_ast = random_qiskit_ast_generator(1, self.operations)
-                ast_circuit_copy.body[mutation_index] = new_gate_ast.body[1]  # Replace the gate
+            # existing_gate = ast_circuit_copy.body[1].body[mutation_index]
+            # Replace the AST
+            ast_circuit_copy.body[1].body[mutation_index] = new_sub_ast  
         
         ast.fix_missing_locations(ast_circuit_copy)
         return ast_circuit_copy
@@ -344,31 +366,33 @@ class gp_deqompiler:
             raise ValueError(f"Unknown selection method: {selection_method}")
 
     def crossover(self, parent1, parent2):
+        
+        # Note: body[0] --> import part, body[1] --> function, body[1].body --> level 1 inside function
+        # print("\n",parent1.body[0],"\n",parent1.body[1],"\n",parent1.body[1].body)
+
         # Select crossover points
-        index1 = random.randint(1, len(parent1.body[0]) - 2)
-        index2 = random.randint(1, len(parent2.body[0]) - 2)
+        index1 = random.randint(1, len(parent1.body[1].body) - 2)
+        index2 = random.randint(1, len(parent2.body[1].body) - 2)
         
         # Swap subcircuits
-        new_body1 = parent1.body[0][:index1] + parent2.body[0][index2:]
-        new_body2 = parent2.body[0][:index2] + parent1.body[0][index1:]
+        new_body1 = parent1.body[1].body[:index1] + parent2.body[1].body[index2:]
+        new_body2 = parent2.body[1].body[:index2] + parent1.body[1].body[index1:]
         
         # Construct new ASTs
-        print(parent1.body[0])
-        child1 = ast.Module(body=[ast.FunctionDef(
-            name=parent1.body[0].name, 
-            args=parent1.body[0].args, 
+        child1 = ast.Module(body=[parent1.body[0], ast.FunctionDef(
+            name=parent1.body[1].name, 
+            args=parent1.body[1].args, 
             body=new_body1, 
             decorator_list=[]
         )], type_ignores=[])
+        ast.fix_missing_locations(child1)
         
-        child2 = ast.Module(body=[ast.FunctionDef(
-            name=parent2.body[0].name, 
-            args=parent2.body[0].args, 
+        child2 = ast.Module(body=[parent2.body[0], ast.FunctionDef(
+            name=parent2.body[1].name, 
+            args=parent2.body[1].args, 
             body=new_body2, 
             decorator_list=[]
         )], type_ignores=[])
-        
-        ast.fix_missing_locations(child1)
         ast.fix_missing_locations(child2)
         
         return child1, child2
@@ -386,7 +410,7 @@ class gp_deqompiler:
             ast_circuit = random_qiskit_ast_generator(operations=self.operations,max_num_nodes=self.max_length,max_loop_depth=self.max_loop_depth)
             population.append(ast_circuit)
 
-        self.clear_files()
+        self.clear_files(self.db_qiskit_path)
 
         for generation in range(self.generations):
             start_time = time.time()
@@ -408,13 +432,16 @@ class gp_deqompiler:
             # Select the best individual and corresponding score
             best_individual = next_generation[0]    # Ok to overwrite as elite members are preserved over generations
             best_score = sorted_scores[0]
+            print("\tBest score in this generation:",best_score)
+            print("\tAverage score in this generation:",sum(fitness_scores)/self.pop_size)
             
             # Find the index of the best individual in the original population
             best_individual_index = fitness_scores.index(best_score) # Will always be present in last generation due to elitism
             
-            # If the best score is 1, stop the iteration
-            if best_score == 1:
-                break
+            # # If the best score is 1, stop the iteration
+            # if best_score == 1:
+            #     break
+            # Score is always less than 1 even for perfect match due to added kc penalty
 
             # Number of individuals to be generated by each method
             crossover_count = int(self.pop_size * self.crossover_rate) if self.perform_crossover == True else 0
@@ -426,17 +453,13 @@ class gp_deqompiler:
             new_population = []
             new_population.extend(next_generation[:elite_count])
 
-            print(elite_count, len(new_population))
-
             # Apply crossover to generate new individuals
             while len(new_population) < elite_count + crossover_count:
-                print("Crossover")
                 parent1, parent2 = self.select_parents(next_generation, sorted_scores, self.selection_method)
                 child1, child2 = self.crossover(parent1, parent2)
                 new_population.extend([child1, child2])
 
             # Apply mutation to new individuals
-            print(mutation_count)
             for _ in range(mutation_count):
                 individual_to_mutate = random.choice(new_population)
                 new_population.append(self.mutate(individual_to_mutate))
@@ -450,33 +473,74 @@ class gp_deqompiler:
 
             end_time = time.time()
             time_taken = end_time - start_time
-            tqdm.write(f"Generation {generation + 1}/{self.generations} completed in {time_taken:.2f} seconds")
+            tqdm.write(f"\tGeneration {generation + 1}/{self.generations} completed in {time_taken:.2f} seconds")
 
-        # TBD: Clear tmp qasm files
+        # Clear temporary qasm files for last generation's last individual. 
+        # These can be reconstructed if required from the decompiled qiskit files stored for all individuals of all generations.
+        self.clear_files(self.db_qasm_path)
 
         # Unparse the AST of the best individual if found
         best_code = ast.unparse(best_individual) if best_individual else "No best individual found"
 
         return best_code, best_score, best_individual_index
 
+    @staticmethod
+    def get_operations(algorithm_name, qubit_limit):
+        """
+        Extract operations from target qasms
+        """
+        operations = []
+        for i in range(2, qubit_limit+1):
+            qasm_file_path = os.path.join('db_qasm_true', f"{algorithm_name}_q{i}.qasm")
+            with open(qasm_file_path, 'r') as file:
+                qasm_str = file.read()
+            quantum_circuit = QuantumCircuit.from_qasm_str(qasm_str)
+            for instruction in quantum_circuit.data:
+                gate_name = instruction.operation.name
+                if gate_name not in operations:
+                    operations.append(gate_name)
+        return operations
+
 if __name__ == "__main__":
 
-    operations = ['h', 'x', 'rx', 'ry', 'rz']
-    generations = 2
-    algorithm_name = 'rx_c'
-    compare_method = 'seq_similarity'
-    perform_crossover = True
-    perform_mutation = True
-    pop_size = 10
-    new_gen_rate = 0.4
-    qubit_limit = 3
-    mutation_rate=0.3
+    algorithm_name = 'gen_ghz'                  # Required. Supports: {'h_0', 'h_c', 'gen_ghz', 'rx_c', 'rx_gradually_c', 'qft', 'qpe', 'grover'}
+    qubit_limit = 20                            # Default: 20
     
-    decompiler = gp_deqompiler(qubit_limit=qubit_limit,mutation_rate=mutation_rate,operations=operations,generations=generations,algorithm_name=algorithm_name,compare_method=compare_method,
-                                perform_crossover=perform_crossover,perform_mutation=perform_mutation,pop_size=pop_size,new_gen_rate=new_gen_rate)
+    generations = 20                            # Default: 100
+    pop_size = 20                               # Default: 50
+    
+    max_length = 10                             # Default: 10
+    max_loop_depth = 2                          # Default: 2
+    # operations = ['h', 'x', 'rx', 'ry', 'rz']   # Default: ['h', 'x', 'cx']. Supports: 'Gate' where <QuantumCircuit>.<Gate>(args) is valid
+    operations = gp_deqompiler.get_operations(algorithm_name, qubit_limit)
+   
+    compare_method = 'seq_similarity'           # Default: '1_by_1'
+    
+    perform_crossover = True                    # Default: True
+    crossover_rate = 0.3                        # Default: 0.3
+    selection_method = 'tournament'             # Default: 'tournament'
+    perform_mutation = True                     # Default: True
+    mutation_rate = 0.2                         # Default: 0.2
+    new_gen_rate = 0.2                          # Default: 0.2
+
+    decompiler = gp_deqompiler(algorithm_name=algorithm_name,
+                               qubit_limit=qubit_limit,
+                               generations=generations,
+                               pop_size=pop_size,
+                               max_length=max_length,
+                               max_loop_depth=max_loop_depth,
+                               operations=operations,
+                               compare_method=compare_method,
+                               perform_crossover=perform_crossover,
+                               crossover_rate=crossover_rate,
+                               selection_method=selection_method,
+                               perform_mutation=perform_mutation,
+                               mutation_rate=mutation_rate,
+                               new_gen_rate=new_gen_rate)
     
     best_code, best_score, best_individual_index = decompiler.run()
     
-    # print("\nBest code:\n",best_code)
+    print("\n\nBest code:\n")
+    print(best_code,"\n")
     print("\nBest score:",best_score)
     print("Best individial ID in last generation:",best_individual_index)

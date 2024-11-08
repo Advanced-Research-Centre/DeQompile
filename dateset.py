@@ -20,7 +20,14 @@ def h_c(n) -> QuantumCircuit:
     for i in range(n):
         qc.h(i)
     return qc
-    
+
+def gen_ghz(n) -> QuantumCircuit:
+    qc = QuantumCircuit(n)
+    qc.h(0)
+    for i in range(1,n):
+        qc.cx(0, i)
+    return qc
+
 def rx_c(n) -> QuantumCircuit:
     qc = QuantumCircuit(n)
     angle = pi
@@ -143,6 +150,8 @@ def db_qasm_generator(algorithm_name, max_qubit):
         circuit_func = h_0
     elif algorithm_name == "h_c":
         circuit_func = h_c
+    elif algorithm_name == "gen_ghz":
+        circuit_func = gen_ghz
     elif algorithm_name == "rx_c":
         circuit_func = rx_c
     elif algorithm_name == "rx_gradually_c":
@@ -168,10 +177,11 @@ def db_qasm_generator(algorithm_name, max_qubit):
         print(f"Saved {filename}")
 
 if __name__ == "__main__":
-    db_qasm_generator('h_0', 40)
-    db_qasm_generator('h_c', 40)
-    db_qasm_generator('rx_c', 40)
-    db_qasm_generator('rx_gradually_c', 40)
-    db_qasm_generator('qft', 20)
-    db_qasm_generator('qpe', 20)
-    db_qasm_generator('grover', 15)
+    # db_qasm_generator('h_0', 40)
+    # db_qasm_generator('h_c', 40)
+    db_qasm_generator('gen_ghz', 40)
+    # db_qasm_generator('rx_c', 40)
+    # db_qasm_generator('rx_gradually_c', 40)
+    # db_qasm_generator('qft', 20)
+    # db_qasm_generator('qpe', 20)
+    # db_qasm_generator('grover', 15)

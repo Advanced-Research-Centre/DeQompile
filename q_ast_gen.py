@@ -31,7 +31,8 @@ def random_expr(curr_loop_depth, max_expr_operators, var_depth):
     for _ in range(max_expr_operators+1):
         left = expr
         right = ast.Name(id=random.choice(vars),ctx=ast.Load())
-        op = random.choice([ast.Add(), ast.Sub()])
+        # op = random.choice([ast.Add(), ast.Sub()])
+        op = ast.Add() # Sub resulting in div-by-0 error
         expr = ast.BinOp(left=left, op=op, right=right)
     return expr    
 
@@ -99,6 +100,7 @@ def random_phase_expr(depth):
     )
 
     sympl_phase_expr = ast.parse(str(simplify(ast.unparse(phase_expr)))).body[0].value
+    # sympl_phase_expr = phase_expr
     return sympl_phase_expr
 
 def loop_index(depth):
@@ -124,10 +126,11 @@ def loop_index(depth):
         value = random.randint(0, depth)  # Using a random integer instead of string
         index = ast.BinOp(left=expr, op=random.choice([ast.Add(), ast.Sub()]), 
                           right=ast.Constant(value=value))
+        sympl_index = ast.parse(str(simplify(ast.unparse(index)))).body[0].value
 
         return ast.Call(
             func=ast.Name(id='abs', ctx=ast.Load()),
-            args=[index],
+            args=[sympl_index],
             keywords=[])
     
 def random_qiskit_ast_gate(operations, curr_loop_depth, num_ops, num_vars):
