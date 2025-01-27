@@ -1,4 +1,12 @@
-# DeQompiler: Genetic Programming based QASM-to-Qiskit decompiler
+# DeQompile: Genetic Programming based QASM-to-Qiskit decompiler
+
+### Quantum circuit decompilation using genetic programming towards explainable quantum architecture search
+
+**Abstract:** Demonstrating quantum advantage using conventional quantum algorithms remains challenging on current noisy gate-based quantum computers. Automated quantum circuit synthesis via quantum machine learning has emerged as a promising solution, employing trainable parametric quantum circuits to alleviate this. The circuit ansatz in these solutions is often designed through reinforcement learning-based quantum architecture search (RL-QAS) when the domain knowledge of the problem and hardware are not effective. However, the interpretability of these synthesized circuits remains a significant bottleneck, limiting their scalability and applicability across diverse problem domains.
+
+This work addresses the challenge of explainability in quantum architecture search (QAS) by introducing a novel genetic programming-based decompiler framework for reverse-engineering high-level quantum algorithms from low-level circuit representations. The proposed approach, implemented in the open-source tool, DeQompile, employs program synthesis techniques, including symbolic regression and abstract syntax tree manipulation, to distill interpretable Qiskit algorithms from quantum assembly language. Validation of benchmark algorithms demonstrates the efficacy of our tool. By integrating the decompiler with online learning frameworks, this research potentiates explainable QAS by fostering the development of generalizable and provable quantum algorithms.
+
+![DeQompile](deqompile.jpg)
 
 ### Quantum Circuit Decompiler: Pattern Recognition of Quantum Circuits By Genetic Algorithm
 

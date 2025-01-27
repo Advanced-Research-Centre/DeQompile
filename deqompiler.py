@@ -10,6 +10,10 @@ import Levenshtein
 import random
 from copy import deepcopy
 from qiskit.circuit import CircuitError
+import matplotlib.pyplot as plt
+from scipy.ndimage import uniform_filter1d
+import seaborn as sns
+import numpy as np
 
 class gp_deqompiler:
     """
@@ -36,6 +40,8 @@ class gp_deqompiler:
         os.makedirs(self.db_qiskit_path, exist_ok=True) # Create the directory if it does not exist
         self.db_qasm_path = os.path.join('db_qasm_decompiled_tmp') # Path to temporary save the generated QASM codes for each problem size for evaluating fitness for an individual
         os.makedirs(self.db_qasm_path, exist_ok=True) # Create the directory if it does not exist
+
+        self.log_scores = []  # Log of scores for each generation
 
     def save_qiskit(self, population, generation):
         """
@@ -428,6 +434,7 @@ class gp_deqompiler:
             sorted_scores, next_generation = zip(*sorted_population)
             next_generation = list(next_generation)
             sorted_scores = list(sorted_scores)
+            self.log_scores.append(sorted_scores)
 
             # Select the best individual and corresponding score
             best_individual = next_generation[0]    # Ok to overwrite as elite members are preserved over generations
@@ -484,6 +491,57 @@ class gp_deqompiler:
 
         return best_code, best_score, best_individual_index
 
+    def save_results(self):
+        pass
+
+    def plot_results(self):
+
+        plt.figure(figsize=(10, 6))
+        
+        # Define the color cycle
+        color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
+
+        # for algorithm, scores in all_scores.items():
+
+        # Convert to numpy array for easier manipulation
+        scores = np.array(self.log_scores)
+
+        # Calculate mean, standard deviation, and max scores
+        mean_scores = np.mean(scores, axis=1)
+        # std_scores = np.std(scores, axis=1)
+        max_scores = np.max(scores, axis=1)
+
+        # Apply smoothing filter
+        smoothed_mean_scores = uniform_filter1d(mean_scores, size=3)
+        # smoothed_std_scores = uniform_filter1d(std_scores, size=3)
+        smoothed_max_scores = uniform_filter1d(max_scores, size=3)
+
+        # Get the color for the current algorithm
+        color = color_cycle.pop(0) if color_cycle else 'blue'
+
+        # Plot the mean scores
+        plt.plot(range(1, self.generations + 1), smoothed_mean_scores, label=f'Mean best fitness ({self.algorithm_name})', color=color)
+            
+        # Plot the max scores with the same color
+        plt.plot(range(1, self.generations + 1), smoothed_max_scores, label=f'Max fitness ({self.algorithm_name})', linestyle='--', color=color)
+
+        # Fill between mean scores and max scores
+        plt.fill_between(range(1, self.generations + 1), smoothed_mean_scores, smoothed_max_scores, alpha=0.2, color=color)
+
+        # Add titles and labels
+        plt.title('DeQompile performance over generations')
+        plt.xlabel('Generation')
+        plt.ylabel(f'Fitness (method: {self.compare_method})')
+        plt.legend()
+        plt.grid(True)
+
+        # Save the plot if a save path is provided
+        # if save_path:
+        #     plt.savefig(save_path)
+        
+        # Show the plot
+        plt.show()
+
     @staticmethod
     def get_operations(algorithm_name, qubit_limit):
         """
@@ -503,18 +561,18 @@ class gp_deqompiler:
 
 if __name__ == "__main__":
 
-    algorithm_name = 'gen_ghz'                  # Required. Supports: {'h_0', 'h_c', 'gen_ghz', 'rx_c', 'rx_gradually_c', 'qft', 'qpe', 'grover'}
+    algorithm_name = 'rx_c'                  # Required. Supports: {'h_0', 'h_c', 'gen_ghz', 'rx_c', 'rx_gradually_c', 'qft', 'qpe', 'grover'}
     qubit_limit = 20                            # Default: 20
     
-    generations = 20                            # Default: 100
-    pop_size = 20                               # Default: 50
+    generations = 150                           # Default: 100
+    pop_size = 40                              # Default: 50
     
     max_length = 10                             # Default: 10
     max_loop_depth = 2                          # Default: 2
     # operations = ['h', 'x', 'rx', 'ry', 'rz']   # Default: ['h', 'x', 'cx']. Supports: 'Gate' where <QuantumCircuit>.<Gate>(args) is valid
     operations = gp_deqompiler.get_operations(algorithm_name, qubit_limit)
    
-    compare_method = 'seq_similarity'           # Default: '1_by_1'
+    compare_method = 'l_by_l'                   # Default: '1_by_1'. Supports: 'fidelity', 'seq_similarity', 'freq_similarity', 'combined', 'l_by_l'
     
     perform_crossover = True                    # Default: True
     crossover_rate = 0.3                        # Default: 0.3
@@ -544,3 +602,5 @@ if __name__ == "__main__":
     print(best_code,"\n")
     print("\nBest score:",best_score)
     print("Best individial ID in last generation:",best_individual_index)
+
+    decompiler.plot_results()
